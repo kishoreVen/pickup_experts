@@ -1,32 +1,31 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Strategy } from '@/lib/types';
+import { GameMode, Strategy } from '@/lib/types';
 import { EXAMPLE_STRATEGY, encodeStrategy, decodeStrategy } from '@/lib/strategyUtils';
 import Header from '@/components/Header';
 import SoccerPitch from '@/components/SoccerPitch';
 import AnimationControls from '@/components/AnimationControls';
 import PromptPanel from '@/components/PromptPanel';
-import AuthModal from '@/components/AuthModal';
 import SettingsModal from '@/components/SettingsModal';
-import { useAuth } from '@/contexts/AuthContext';
 
 export default function Home() {
-  const { user, supabase, refreshProfile } = useAuth();
-
   const [strategy, setStrategy] = useState<Strategy>(EXAMPLE_STRATEGY);
+  const [gameMode, setGameMode] = useState<GameMode>('5v5');
+  const gameModeRef = useRef<GameMode>('5v5');
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [isEditing, setIsEditing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [showAuthModal, setShowAuthModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
   const rafRef = useRef<number>(0);
   const lastTsRef = useRef<number | undefined>(undefined);
+
+  // Keep ref in sync so callAPI useCallbacks always see the latest mode
+  useEffect(() => { gameModeRef.current = gameMode; }, [gameMode]);
 
   // ── Animation loop ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -63,24 +62,11 @@ export default function Home() {
       try {
         const decoded = decodeStrategy(hash.slice('#strategy='.length));
         setStrategy(decoded);
+        if (decoded.gameMode) setGameMode(decoded.gameMode);
       } catch {
         console.warn('Could not parse strategy from URL hash');
       }
     }
-  }, []);
-
-  // ── Handle ?subscription=success ────────────────────────────────────────────
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('subscription') === 'success') {
-      showToast('Welcome to Pro! 🎉');
-      refreshProfile();
-      // Clean the URL
-      const url = new URL(window.location.href);
-      url.searchParams.delete('subscription');
-      window.history.replaceState(null, '', url.toString());
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -99,7 +85,7 @@ export default function Home() {
       const res = await fetch('/api/generate-strategy', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ prompt, existingStrategy: existing }),
+        body: JSON.stringify({ prompt, existingStrategy: existing, gameMode: gameModeRef.current }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -131,21 +117,11 @@ export default function Home() {
 
   const handleLoadStrategy = useCallback((s: Strategy) => {
     setStrategy(s);
+    if (s.gameMode) setGameMode(s.gameMode);
     setCurrentTime(0);
     setIsPlaying(false);
   }, []);
 
-  const handlePlayerMove = useCallback((playerId: string, x: number, y: number) => {
-    setStrategy(prev => ({
-      ...prev,
-      players: prev.players.map(p => {
-        if (p.id !== playerId) return p;
-        const kf = [...p.keyframes];
-        kf[0] = { ...kf[0], x, y };
-        return { ...p, keyframes: kf };
-      }),
-    }));
-  }, []);
 
   const handleShare = () => {
     const url = `${window.location.origin}${window.location.pathname}#strategy=${encodeStrategy(strategy)}`;
@@ -155,53 +131,14 @@ export default function Home() {
       .catch(() => showToast('Copy failed — check browser permissions'));
   };
 
-  const handleSave = async () => {
-    if (user) {
-      // Save to Supabase
-      try {
-        const payload = {
-          user_id: user.id,
-          title: strategy.title,
-          description: strategy.description,
-          strategy_json: strategy,
-          updated_at: new Date().toISOString(),
-        };
-
-        if (strategy.id && !strategy.id.startsWith('strategy_') && !strategy.id.startsWith('demo')) {
-          // Update existing Supabase row
-          const { error: upsertError } = await supabase
-            .from('strategies')
-            .update({ ...payload })
-            .eq('id', strategy.id)
-            .eq('user_id', user.id);
-          if (upsertError) throw upsertError;
-        } else {
-          // Insert new row and capture the UUID
-          const { data, error: insertError } = await supabase
-            .from('strategies')
-            .insert(payload)
-            .select('id')
-            .single();
-          if (insertError) throw insertError;
-          if (data?.id) {
-            setStrategy(prev => ({ ...prev, id: data.id }));
-          }
-        }
-        showToast('Strategy saved!');
-      } catch (err: unknown) {
-        console.error('[handleSave]', err);
-        showToast('Could not save to cloud');
-      }
-    } else {
-      // Guest — localStorage fallback
-      try {
-        const saved: Strategy[] = JSON.parse(localStorage.getItem('savedStrategies') || '[]');
-        const updated = [{ ...strategy, savedAt: new Date().toISOString() }, ...saved].slice(0, 20);
-        localStorage.setItem('savedStrategies', JSON.stringify(updated));
-        showToast('Strategy saved locally!');
-      } catch {
-        showToast('Could not save — localStorage unavailable');
-      }
+  const handleSave = () => {
+    try {
+      const saved: Strategy[] = JSON.parse(localStorage.getItem('savedStrategies') || '[]');
+      const updated = [{ ...strategy, createdAt: new Date().toISOString() }, ...saved.filter(s => s.id !== strategy.id)].slice(0, 20);
+      localStorage.setItem('savedStrategies', JSON.stringify(updated));
+      showToast('Strategy saved!');
+    } catch {
+      showToast('Could not save — localStorage unavailable');
     }
   };
 
@@ -222,13 +159,9 @@ export default function Home() {
     <div className="h-screen flex flex-col bg-[#080e0c] text-white overflow-hidden">
       {/* ── Top bar ── */}
       <Header
-        strategy={strategy}
-        isEditing={isEditing}
         onShare={handleShare}
         onSave={handleSave}
         onNew={handleNew}
-        onToggleEdit={() => setIsEditing(e => !e)}
-        onOpenAuth={() => setShowAuthModal(true)}
         onOpenSettings={() => setShowSettings(true)}
       />
 
@@ -241,8 +174,9 @@ export default function Home() {
             <SoccerPitch
               strategy={strategy}
               currentTime={currentTime}
-              isEditing={isEditing}
-              onPlayerMove={handlePlayerMove}
+              isEditing={false}
+              gameMode={gameMode}
+              onPlayerMove={() => {}}
             />
           </div>
 
@@ -265,6 +199,8 @@ export default function Home() {
             strategy={strategy}
             isLoading={isLoading}
             error={error}
+            gameMode={gameMode}
+            onGameModeChange={setGameMode}
             onGenerate={handleGenerate}
             onRefine={handleRefine}
             onLoadStrategy={handleLoadStrategy}
@@ -279,14 +215,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* ── Modals ── */}
-      {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} />}
-      {showSettings && (
-        <SettingsModal
-          onClose={() => setShowSettings(false)}
-          onOpenAuth={() => { setShowSettings(false); setShowAuthModal(true); }}
-        />
-      )}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
     </div>
   );
 }

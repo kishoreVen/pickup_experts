@@ -20,6 +20,8 @@ export interface BallTrack {
   keyframes: BallKeyframe[];
 }
 
+export type GameMode = '5v5' | '3v3' | '1v1';
+
 export interface Strategy {
   id: string;
   title: string;
@@ -29,4 +31,5 @@ export interface Strategy {
   ball: BallTrack;
   prompt?: string;
   createdAt?: string;
+  gameMode?: GameMode;
 }

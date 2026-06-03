@@ -2,35 +2,42 @@
 
 import { useState, useEffect } from 'react';
 import { Loader2, Wand2, RefreshCw, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
-import { Strategy } from '@/lib/types';
+import { GameMode, Strategy } from '@/lib/types';
 import { getFormation } from '@/lib/strategyUtils';
-import { useAuth } from '@/contexts/AuthContext';
 import { useSettings } from '@/hooks/useSettings';
 
-interface SavedStrategyRow {
-  id: string;
-  title: string;
-  description: string | null;
-  created_at: string;
-  strategy_json: Strategy;
-}
 
 interface PromptPanelProps {
   strategy: Strategy;
   isLoading: boolean;
   error: string | null;
+  gameMode: GameMode;
+  onGameModeChange: (mode: GameMode) => void;
   onGenerate: (prompt: string, apiKey?: string) => void;
   onRefine: (prompt: string, apiKey?: string) => void;
   onLoadStrategy: (strategy: Strategy) => void;
 }
 
-const EXAMPLES = [
-  '4-3-3 high press: regain the ball in midfield then launch a quick counter',
-  'Corner kick — near-post run, far-post header, rebound option at the edge',
-  '3-5-2 overlapping wingbacks combine down the left to cross into the box',
-  'Low block 5-4-1, intercept in the half, release the striker on the break',
-  'Tiki-taka sequence: 10 passes through the lines, open up space for a shot',
-];
+const EXAMPLES: Record<GameMode, string[]> = {
+  '5v5': [
+    'GK plays short to CM, drives forward, releases ST who finishes low',
+    'Quick one-two to beat the press, burst down the right, low cross',
+    'Win the ball high up, immediate 3v2 counter to goal',
+    'Set piece: short corner, overlapping run, first-time finish',
+  ],
+  '3v3': [
+    'GK kick-out triggers a 2v1 overload — defender to striker',
+    'High press to win possession, direct run, finish near post',
+    'One-two wall pass past the last defender, composed finish',
+    'Absorb pressure deep, quick turnover, fast break 2v1',
+  ],
+  '1v1': [
+    'Drive at goal, feint left, cut right, curl to far corner',
+    'Receive back to goal, sharp turn, low shot near post',
+    'Step-over to create space, compose, place it far corner',
+    'Burst of pace, shift inside, strike with instep',
+  ],
+};
 
 type Tab = 'generate' | 'refine' | 'plays';
 
@@ -38,50 +45,37 @@ export default function PromptPanel({
   strategy,
   isLoading,
   error,
+  gameMode,
+  onGameModeChange,
   onGenerate,
   onRefine,
   onLoadStrategy,
 }: PromptPanelProps) {
-  const { user, supabase } = useAuth();
   const { apiKey } = useSettings();
   const [prompt, setPrompt] = useState('');
   const [tab, setTab] = useState<Tab>('generate');
   const [showPlayers, setShowPlayers] = useState(false);
-
-  // My Plays state
-  const [plays, setPlays] = useState<SavedStrategyRow[]>([]);
-  const [playsLoading, setPlaysLoading] = useState(false);
+  const [plays, setPlays] = useState<Strategy[]>([]);
 
   const homePlayers = strategy.players.filter(p => p.team === 'home');
   const awayPlayers = strategy.players.filter(p => p.team === 'away');
   const homeFormation = getFormation(strategy.players, 'home');
   const awayFormation = getFormation(strategy.players, 'away');
 
-  // Fetch strategies when My Plays tab is active
   useEffect(() => {
-    if (tab !== 'plays' || !user) return;
+    if (tab !== 'plays') return;
+    try {
+      const saved: Strategy[] = JSON.parse(localStorage.getItem('savedStrategies') || '[]');
+      setPlays(saved);
+    } catch { setPlays([]); }
+  }, [tab]);
 
-    const fetchPlays = async () => {
-      setPlaysLoading(true);
-      try {
-        const { data } = await supabase
-          .from('strategies')
-          .select('id, title, description, created_at, strategy_json')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(30);
-        setPlays((data as SavedStrategyRow[]) ?? []);
-      } finally {
-        setPlaysLoading(false);
-      }
-    };
-
-    fetchPlays();
-  }, [tab, user, supabase]);
-
-  const handleDeletePlay = async (id: string) => {
-    await supabase.from('strategies').delete().eq('id', id);
-    setPlays(prev => prev.filter(p => p.id !== id));
+  const handleDeletePlay = (id: string) => {
+    try {
+      const saved: Strategy[] = JSON.parse(localStorage.getItem('savedStrategies') || '[]');
+      localStorage.setItem('savedStrategies', JSON.stringify(saved.filter(s => s.id !== id)));
+      setPlays(prev => prev.filter(p => p.id !== id));
+    } catch { /* ignore */ }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -141,6 +135,31 @@ export default function PromptPanel({
         </div>
       </div>
 
+      {/* ── Game mode selector ── */}
+      <div className="px-4 py-2 border-b border-[#1a2d22] flex-shrink-0">
+        <p className="text-[9px] font-black text-[#3a5a44] uppercase tracking-widest mb-1.5">Mode</p>
+        <div className="flex gap-1">
+          {(['5v5', '3v3', '1v1'] as GameMode[]).map(m => (
+            <button
+              key={m}
+              onClick={() => onGameModeChange(m)}
+              className={`flex-1 py-1 rounded text-[10px] font-black uppercase tracking-wider transition-all ${
+                gameMode === m
+                  ? 'bg-[#22c55e] text-black'
+                  : 'bg-[#0e1a15] border border-[#1a2d22] text-[#5a7a64] hover:text-white hover:border-[#22c55e]'
+              }`}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+        <p className="text-[9px] text-[#3a5a44] mt-1 leading-relaxed">
+          {gameMode === '5v5' && '5 outfield + 1 GK each'}
+          {gameMode === '3v3' && '3 outfield + 1 GK each'}
+          {gameMode === '1v1' && 'No GK — small goals'}
+        </p>
+      </div>
+
       {/* ── Mode tabs ── */}
       <div className="flex border-b border-[#1a2d22] flex-shrink-0">
         <TabButton
@@ -172,7 +191,7 @@ export default function PromptPanel({
               Try one of these:
             </p>
             <div className="space-y-1">
-              {EXAMPLES.map((ex, i) => (
+              {EXAMPLES[gameMode].map((ex, i) => (
                 <button
                   key={i}
                   onClick={() => setPrompt(ex)}
@@ -211,46 +230,31 @@ export default function PromptPanel({
 
         {tab === 'plays' && (
           <div>
-            {!user ? (
+            {plays.length === 0 ? (
               <div className="text-center py-8">
                 <p className="text-[12px] text-[#5a7a64] leading-relaxed">
-                  Sign in to save and load strategies.
-                </p>
-              </div>
-            ) : playsLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 size={16} className="animate-spin text-[#22c55e]" />
-              </div>
-            ) : plays.length === 0 ? (
-              <div className="text-center py-8">
-                <p className="text-[12px] text-[#5a7a64] leading-relaxed">
-                  No saved plays yet. Generate a strategy and save it!
+                  No saved plays yet. Generate a strategy and hit Save!
                 </p>
               </div>
             ) : (
               <div className="space-y-2">
                 {plays.map(play => (
-                  <div
-                    key={play.id}
-                    className="bg-[#0e1a15] border border-[#1a2d22] rounded-lg p-3 group"
-                  >
+                  <div key={play.id} className="bg-[#0e1a15] border border-[#1a2d22] rounded-lg p-3 group">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
-                        <p className="text-[12px] font-bold text-white truncate leading-tight">
-                          {play.title}
-                        </p>
+                        <p className="text-[12px] font-bold text-white truncate leading-tight">{play.title}</p>
                         {play.description && (
-                          <p className="text-[10px] text-[#5a7a64] mt-0.5 leading-relaxed line-clamp-2">
-                            {play.description}
+                          <p className="text-[10px] text-[#5a7a64] mt-0.5 leading-relaxed line-clamp-2">{play.description}</p>
+                        )}
+                        {play.createdAt && (
+                          <p className="text-[9px] text-[#3a5a44] mt-1 uppercase tracking-wider">
+                            {new Date(play.createdAt).toLocaleDateString()}
                           </p>
                         )}
-                        <p className="text-[9px] text-[#3a5a44] mt-1 uppercase tracking-wider">
-                          {new Date(play.created_at).toLocaleDateString()}
-                        </p>
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
                         <button
-                          onClick={() => onLoadStrategy(play.strategy_json)}
+                          onClick={() => onLoadStrategy(play)}
                           className="px-2.5 py-1 rounded bg-[#22c55e] hover:bg-[#16a34a] text-black text-[10px] font-black uppercase tracking-wider transition-all"
                         >
                           Load
