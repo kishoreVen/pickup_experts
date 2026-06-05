@@ -50,6 +50,35 @@ function catmullRomPath(pts: { x: number; y: number }[]): string {
   return d;
 }
 
+// ── Player animation state ────────────────────────────────────────────────────
+type AnimState = 'idle' | 'walk' | 'run' | 'kick' | 'save' | 'dribble' | 'tackle' | 'celebrate';
+
+function getAnimState(
+  player: PlayerData,
+  currentTime: number,
+  ball: BallTrack,
+  ballEvent: string | null,
+  duration: number,
+): AnimState {
+  if (currentTime > duration - 1200 && duration > 2000) return 'celebrate';
+
+  const pos     = interpolatePosition(player.keyframes, currentTime);
+  const prevPos = interpolatePosition(player.keyframes, Math.max(0, currentTime - 80));
+  const speed   = Math.sqrt((pos.x - prevPos.x) ** 2 + (pos.y - prevPos.y) ** 2);
+
+  const ballPos    = interpolatePosition(ball.keyframes, currentTime);
+  const distToBall = Math.sqrt((pos.x - ballPos.x) ** 2 + (pos.y - ballPos.y) ** 2);
+
+  if (player.role === 'GK' && ballEvent === 'shot' && distToBall < 0.2) return 'save';
+  if ((ballEvent === 'shot' || ballEvent === 'pass' || ballEvent === 'cross') && distToBall < 0.1) return 'kick';
+  if (ballEvent === 'dribble' && distToBall < 0.08) return 'dribble';
+  if (speed > 0.01 && distToBall > 0.07 && distToBall < 0.18 &&
+      (player.role === 'CB' || player.role === 'CM')) return 'tackle';
+  if (speed > 0.007) return 'run';
+  if (speed > 0.0015) return 'walk';
+  return 'idle';
+}
+
 // Soccer ball pentagon helper
 function pentagonPts(cx: number, cy: number, r: number, startDeg: number): string {
   return Array.from({ length: 5 }, (_, i) => {
@@ -152,6 +181,19 @@ export default function SoccerPitch({
         onPointerLeave={handlePointerUp}
       >
         <defs>
+          <style>{`
+            @keyframes legL-walk  { 0%,100%{transform:translateY(0)}      50%{transform:translateY(3.5px)} }
+            @keyframes legR-walk  { 0%,100%{transform:translateY(3.5px)}  50%{transform:translateY(0)} }
+            @keyframes body-bob   { 0%,100%{transform:translateY(0)}      50%{transform:translateY(-1.5px)} }
+            @keyframes kick-leg   { 0%{transform:translateY(0) rotate(0deg)} 35%{transform:translateY(-7px) rotate(-28deg)} 65%{transform:translateY(4px) rotate(18deg)} 100%{transform:translateY(0) rotate(0deg)} }
+            @keyframes save-armL  { 0%,100%{transform:translate(0,0) rotate(0deg)} 50%{transform:translate(-7px,-9px) rotate(-55deg)} }
+            @keyframes save-armR  { 0%,100%{transform:translate(0,0) rotate(0deg)} 50%{transform:translate(7px,-9px)  rotate(55deg)} }
+            @keyframes cel-jump   { 0%,100%{transform:translateY(0)}      50%{transform:translateY(-6px)} }
+            @keyframes cel-armL   { 0%,100%{transform:translate(0,0) rotate(0deg)} 50%{transform:translate(-3px,-11px) rotate(-72deg)} }
+            @keyframes cel-armR   { 0%,100%{transform:translate(0,0) rotate(0deg)} 50%{transform:translate(3px,-11px)  rotate(72deg)} }
+            @keyframes drib-sway  { 0%,100%{transform:rotate(-7deg)}      50%{transform:rotate(7deg)} }
+            @keyframes tackle-lean{ 0%{transform:rotate(0deg)} 55%{transform:rotate(22deg)} 100%{transform:rotate(0deg)} }
+          `}</style>
           <marker id="arr-home" markerWidth="5" markerHeight="5" refX="4.5" refY="2.5" orient="auto">
             <polygon points="0 0, 5 2.5, 0 5" fill={HOME_COLOR} opacity="0.75" />
           </marker>
@@ -188,59 +230,20 @@ export default function SoccerPitch({
               <PlayerTrajectoryLine key={`traj-${player.id}`} player={player} cfg={cfg} />
             ))}
             <BallDot ball={strategy.ball} currentTime={currentTime} event={ballEvent} cfg={cfg} />
-            {strategy.players.map(player => {
-              const pos = interpolatePosition(player.keyframes, currentTime);
-              const { sx, sy } = toSVG(pos.x, pos.y, cfg.pw, cfg.ph);
-              const color = player.team === 'home' ? HOME_COLOR : AWAY_COLOR;
-              const isDragging = draggingId.current === player.id;
-
-              return (
-                <g
-                  key={player.id}
-                  transform={`translate(${sx},${sy})`}
-                  style={{ cursor: isEditing ? (isDragging ? 'grabbing' : 'grab') : 'default' }}
-                  onPointerDown={e => handlePlayerPointerDown(e, player.id)}
-                >
-                  {(() => {
-                    const isGK = player.role === 'GK';
-                    const jersey = isGK ? GK_COLOR : color;
-                    const shorts = isGK ? GK_SHORTS : (player.team === 'home' ? HOME_SHORTS : AWAY_SHORTS);
-                    const glowId = `glow-${player.team}`;
-                    return (
-                      <>
-                        {/* ground shadow */}
-                        <ellipse cx={0} cy={13} rx={9} ry={3} fill="rgba(0,0,0,0.3)" />
-                        {isEditing && (
-                          <rect x={-14} y={-17} width={28} height={30} rx={3} fill="none" stroke={color} strokeWidth={1.5} strokeDasharray="4 3" opacity={0.5} />
-                        )}
-                        {/* left arm */}
-                        <rect x={-11} y={-5} width={4} height={7} fill={jersey} filter={isDragging ? `url(#${glowId})` : undefined} opacity={isDragging ? 0.75 : 1} />
-                        {/* right arm */}
-                        <rect x={7} y={-5} width={4} height={7} fill={jersey} filter={isDragging ? `url(#${glowId})` : undefined} opacity={isDragging ? 0.75 : 1} />
-                        {/* jersey body */}
-                        <rect x={-7} y={-5} width={14} height={12} fill={jersey} rx={1} filter={isDragging ? `url(#${glowId})` : undefined} opacity={isDragging ? 0.75 : 1} />
-                        {/* shorts / left leg */}
-                        <rect x={-6} y={7} width={5} height={6} fill={shorts} />
-                        {/* shorts / right leg */}
-                        <rect x={1} y={7} width={5} height={6} fill={shorts} />
-                        {/* head */}
-                        <rect x={-5} y={-15} width={10} height={9} rx={2} fill="#d4935a" />
-                        {/* hair */}
-                        <rect x={-5} y={-15} width={10} height={3} rx={2} fill="#5c3317" />
-                        {/* jersey number */}
-                        <text textAnchor="middle" dominantBaseline="central" x={0} y={2} fontSize="5.5" fontWeight="900" fill="white" style={{ fontFamily: 'system-ui, sans-serif', userSelect: 'none', pointerEvents: 'none' }}>
-                          {player.number}
-                        </text>
-                        {/* role label */}
-                        <text y={22} textAnchor="middle" fontSize="7.5" fontWeight="700" fill="rgba(255,255,255,0.7)" style={{ fontFamily: 'system-ui, sans-serif', userSelect: 'none', pointerEvents: 'none' }}>
-                          {player.role}
-                        </text>
-                      </>
-                    );
-                  })()}
-                </g>
-              );
-            })}
+            {strategy.players.map(player => (
+              <PlayerSprite
+                key={player.id}
+                player={player}
+                currentTime={currentTime}
+                ball={strategy.ball}
+                ballEvent={ballEvent}
+                duration={strategy.duration}
+                cfg={cfg}
+                isEditing={isEditing}
+                isDragging={draggingId.current === player.id}
+                onPointerDown={e => handlePlayerPointerDown(e, player.id)}
+              />
+            ))}
           </>
         )}
 
@@ -260,6 +263,95 @@ export default function SoccerPitch({
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
+
+interface PlayerSpriteProps {
+  player: PlayerData;
+  currentTime: number;
+  ball: BallTrack;
+  ballEvent: string | null;
+  duration: number;
+  cfg: PitchConfig;
+  isEditing: boolean;
+  isDragging: boolean;
+  onPointerDown: (e: React.PointerEvent) => void;
+}
+
+function PlayerSprite({ player, currentTime, ball, ballEvent, duration, cfg, isEditing, isDragging, onPointerDown }: PlayerSpriteProps) {
+  const color  = player.team === 'home' ? HOME_COLOR : AWAY_COLOR;
+  const isGK   = player.role === 'GK';
+  const jersey = isGK ? GK_COLOR : color;
+  const shorts = isGK ? GK_SHORTS : (player.team === 'home' ? HOME_SHORTS : AWAY_SHORTS);
+  const glowId = `glow-${player.team}`;
+
+  const pos      = interpolatePosition(player.keyframes, currentTime);
+  const { sx, sy } = toSVG(pos.x, pos.y, cfg.pw, cfg.ph);
+  const anim     = getAnimState(player, currentTime, ball, ballEvent, duration);
+  const walkDur  = anim === 'run' || anim === 'tackle' ? '0.25s' : '0.5s';
+  const isMoving = anim === 'walk' || anim === 'run' || anim === 'dribble' || anim === 'tackle';
+
+  const bodyGroupStyle: React.CSSProperties = {
+    transformBox: 'fill-box', transformOrigin: '50% 50%',
+    animation: anim === 'celebrate' ? 'cel-jump 0.38s infinite ease-in-out'
+      : anim === 'tackle'   ? 'tackle-lean 0.4s 3 ease-in-out'
+      : anim === 'dribble'  ? 'drib-sway 0.35s infinite ease-in-out'
+      : isMoving            ? `body-bob ${walkDur} infinite ease-in-out`
+      : 'none',
+  };
+  const armLStyle: React.CSSProperties = {
+    transformBox: 'fill-box', transformOrigin: '100% 0%',
+    animation: anim === 'save'      ? 'save-armL 0.5s ease-out forwards'
+      : anim === 'celebrate'        ? 'cel-armL 0.38s infinite ease-in-out'
+      : 'none',
+  };
+  const armRStyle: React.CSSProperties = {
+    transformBox: 'fill-box', transformOrigin: '0% 0%',
+    animation: anim === 'save'      ? 'save-armR 0.5s ease-out forwards'
+      : anim === 'celebrate'        ? 'cel-armR 0.38s infinite ease-in-out'
+      : 'none',
+  };
+  const legLStyle: React.CSSProperties = {
+    transformBox: 'fill-box', transformOrigin: '50% 0%',
+    animation: isMoving ? `legL-walk ${walkDur} infinite ease-in-out` : 'none',
+  };
+  const legRStyle: React.CSSProperties = {
+    transformBox: 'fill-box', transformOrigin: '50% 0%',
+    animation: anim === 'kick' || anim === 'dribble' ? 'kick-leg 0.35s ease-out forwards'
+      : isMoving ? `legR-walk ${walkDur} infinite ease-in-out`
+      : 'none',
+  };
+
+  return (
+    <g
+      transform={`translate(${sx},${sy})`}
+      style={{ cursor: isEditing ? (isDragging ? 'grabbing' : 'grab') : 'default' }}
+      onPointerDown={onPointerDown}
+    >
+      <ellipse cx={0} cy={13} rx={9} ry={3} fill="rgba(0,0,0,0.3)" />
+      {isEditing && (
+        <rect x={-14} y={-17} width={28} height={30} rx={3} fill="none" stroke={color} strokeWidth={1.5} strokeDasharray="4 3" opacity={0.5} />
+      )}
+      <g style={bodyGroupStyle}>
+        <rect x={-11} y={-5} width={4} height={7} fill={jersey} opacity={isDragging ? 0.75 : 1} style={armLStyle} />
+        <rect x={7}   y={-5} width={4} height={7} fill={jersey} opacity={isDragging ? 0.75 : 1} style={armRStyle} />
+        <rect x={-7}  y={-5} width={14} height={12} fill={jersey} rx={1}
+              filter={isDragging ? `url(#${glowId})` : undefined} opacity={isDragging ? 0.75 : 1} />
+        <rect x={-6} y={7} width={5} height={6} fill={shorts} style={legLStyle} />
+        <rect x={1}  y={7} width={5} height={6} fill={shorts} style={legRStyle} />
+        <rect x={-5} y={-15} width={10} height={9} rx={2} fill="#d4935a" />
+        <rect x={-5} y={-15} width={10} height={3}  rx={2} fill="#5c3317" />
+        <text textAnchor="middle" dominantBaseline="central" x={0} y={2}
+              fontSize="5.5" fontWeight="900" fill="white"
+              style={{ fontFamily: 'system-ui, sans-serif', userSelect: 'none', pointerEvents: 'none' }}>
+          {player.number}
+        </text>
+      </g>
+      <text y={22} textAnchor="middle" fontSize="7.5" fontWeight="700" fill="rgba(255,255,255,0.7)"
+            style={{ fontFamily: 'system-ui, sans-serif', userSelect: 'none', pointerEvents: 'none' }}>
+        {player.role}
+      </text>
+    </g>
+  );
+}
 
 function PitchMarkings({ cfg }: { cfg: PitchConfig }) {
   const { pw, ph, goalH, goalD, goalBoxW, goalBoxH, pad, centerR, stripes } = cfg;
