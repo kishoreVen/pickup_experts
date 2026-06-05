@@ -63,7 +63,9 @@ RULES:
 - Ball keyframes must spatially match the player holding/kicking it
 - event types: "pass" | "shot" | "cross" | "dribble" | "clearance"
 - Create smooth, realistic paths with 3–5 keyframes per player
-- Attacking players make runs into space; defenders track runners`;
+- Attacking players make runs into space; defenders track runners
+- GOAL / SHOT ON TARGET: the ball's FINAL keyframe must be inside the goal mouth. Home team scores (attacks right): x=0.97, y=0.50. Away team scores (attacks left): x=0.03, y=0.50. Mark the second-to-last ball keyframe with event "shot".
+- PASS / CROSS: ball path must go from the kicking player's position to the receiving player's position at the correct time`;
 }
 
 function extractJSON(text: string): unknown {

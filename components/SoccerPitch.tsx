@@ -23,9 +23,40 @@ const CONFIGS: Record<GameMode, PitchConfig> = {
   '1v1': { pw: 210, ph: 160, goalH: 22, goalD: 14, goalBoxW: 0,  goalBoxH: 0,   pad: 24, centerR: 0,  stripes: 2 },
 };
 
-const HOME_COLOR = '#ef4444';
-const AWAY_COLOR = '#3b82f6';
-const PLAYER_R = 14;
+const HOME_COLOR   = '#ef4444';
+const AWAY_COLOR   = '#3b82f6';
+const GK_COLOR     = '#84cc16'; // lime green for both GKs
+const HOME_SHORTS  = '#7f1d1d'; // dark red
+const AWAY_SHORTS  = '#1e3a8a'; // dark blue
+const GK_SHORTS    = '#365314'; // dark green
+const PLAYER_R     = 14;
+
+// Smooth ball trajectory: Catmull-Rom → cubic bezier
+function catmullRomPath(pts: { x: number; y: number }[]): string {
+  if (pts.length < 2) return '';
+  if (pts.length === 2) return `M ${pts[0].x},${pts[0].y} L ${pts[1].x},${pts[1].y}`;
+  let d = `M ${pts[0].x},${pts[0].y}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[Math.min(pts.length - 1, i + 2)];
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C ${cp1x.toFixed(2)},${cp1y.toFixed(2)} ${cp2x.toFixed(2)},${cp2y.toFixed(2)} ${p2.x},${p2.y}`;
+  }
+  return d;
+}
+
+// Soccer ball pentagon helper
+function pentagonPts(cx: number, cy: number, r: number, startDeg: number): string {
+  return Array.from({ length: 5 }, (_, i) => {
+    const a = (startDeg + i * 72) * (Math.PI / 180);
+    return `${(cx + r * Math.cos(a)).toFixed(2)},${(cy + r * Math.sin(a)).toFixed(2)}`;
+  }).join(' ');
+}
 
 interface SoccerPitchProps {
   strategy: Strategy | null;
@@ -170,18 +201,43 @@ export default function SoccerPitch({
                   style={{ cursor: isEditing ? (isDragging ? 'grabbing' : 'grab') : 'default' }}
                   onPointerDown={e => handlePlayerPointerDown(e, player.id)}
                 >
-                  <ellipse cx={0} cy={3} rx={PLAYER_R} ry={4} fill="rgba(0,0,0,0.35)" />
-                  {isEditing && (
-                    <circle r={PLAYER_R + 5} fill="none" stroke={color} strokeWidth={1.5} strokeDasharray="4 3" opacity={0.5} />
-                  )}
-                  <circle r={PLAYER_R} fill={color} filter={isDragging ? `url(#glow-${player.team})` : undefined} opacity={isDragging ? 0.75 : 1} />
-                  <circle cx={-4} cy={-4} r={5} fill="rgba(255,255,255,0.18)" />
-                  <text textAnchor="middle" dominantBaseline="central" fontSize="11" fontWeight="800" fill="white" style={{ fontFamily: 'system-ui, sans-serif', userSelect: 'none', pointerEvents: 'none' }}>
-                    {player.number}
-                  </text>
-                  <text y={PLAYER_R + 8} textAnchor="middle" fontSize="8" fontWeight="700" fill="rgba(255,255,255,0.75)" style={{ fontFamily: 'system-ui, sans-serif', userSelect: 'none', pointerEvents: 'none' }}>
-                    {player.role}
-                  </text>
+                  {(() => {
+                    const isGK = player.role === 'GK';
+                    const jersey = isGK ? GK_COLOR : color;
+                    const shorts = isGK ? GK_SHORTS : (player.team === 'home' ? HOME_SHORTS : AWAY_SHORTS);
+                    const glowId = `glow-${player.team}`;
+                    return (
+                      <>
+                        {/* ground shadow */}
+                        <ellipse cx={0} cy={13} rx={9} ry={3} fill="rgba(0,0,0,0.3)" />
+                        {isEditing && (
+                          <rect x={-14} y={-17} width={28} height={30} rx={3} fill="none" stroke={color} strokeWidth={1.5} strokeDasharray="4 3" opacity={0.5} />
+                        )}
+                        {/* left arm */}
+                        <rect x={-11} y={-5} width={4} height={7} fill={jersey} filter={isDragging ? `url(#${glowId})` : undefined} opacity={isDragging ? 0.75 : 1} />
+                        {/* right arm */}
+                        <rect x={7} y={-5} width={4} height={7} fill={jersey} filter={isDragging ? `url(#${glowId})` : undefined} opacity={isDragging ? 0.75 : 1} />
+                        {/* jersey body */}
+                        <rect x={-7} y={-5} width={14} height={12} fill={jersey} rx={1} filter={isDragging ? `url(#${glowId})` : undefined} opacity={isDragging ? 0.75 : 1} />
+                        {/* shorts / left leg */}
+                        <rect x={-6} y={7} width={5} height={6} fill={shorts} />
+                        {/* shorts / right leg */}
+                        <rect x={1} y={7} width={5} height={6} fill={shorts} />
+                        {/* head */}
+                        <rect x={-5} y={-15} width={10} height={9} rx={2} fill="#d4935a" />
+                        {/* hair */}
+                        <rect x={-5} y={-15} width={10} height={3} rx={2} fill="#5c3317" />
+                        {/* jersey number */}
+                        <text textAnchor="middle" dominantBaseline="central" x={0} y={2} fontSize="5.5" fontWeight="900" fill="white" style={{ fontFamily: 'system-ui, sans-serif', userSelect: 'none', pointerEvents: 'none' }}>
+                          {player.number}
+                        </text>
+                        {/* role label */}
+                        <text y={22} textAnchor="middle" fontSize="7.5" fontWeight="700" fill="rgba(255,255,255,0.7)" style={{ fontFamily: 'system-ui, sans-serif', userSelect: 'none', pointerEvents: 'none' }}>
+                          {player.role}
+                        </text>
+                      </>
+                    );
+                  })()}
                 </g>
               );
             })}
@@ -263,11 +319,15 @@ function PlayerTrajectoryLine({ player, cfg }: { player: PlayerData; cfg: PitchC
 
 function BallTrajectoryLine({ ball, cfg }: { ball: BallTrack; cfg: PitchConfig }) {
   if (ball.keyframes.length < 2) return null;
-  const points = ball.keyframes
-    .map(kf => { const { sx, sy } = toSVG(kf.x, kf.y, cfg.pw, cfg.ph); return `${sx},${sy}`; })
-    .join(' ');
-  return <polyline points={points} fill="none" stroke="rgba(255,255,255,0.45)" strokeWidth={2} strokeDasharray="9 6" markerEnd="url(#arr-ball)" />;
+  const pts = ball.keyframes.map(kf => {
+    const { sx, sy } = toSVG(kf.x, kf.y, cfg.pw, cfg.ph);
+    return { x: sx, y: sy };
+  });
+  return <path d={catmullRomPath(pts)} fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth={2} strokeDasharray="9 6" markerEnd="url(#arr-ball)" />;
 }
+
+const BALL_R = 11;
+const OUTER_ANGLES = [-90, -18, 54, 126, 198]; // match center pentagon vertices
 
 function BallDot({ ball, currentTime, event, cfg }: { ball: BallTrack; currentTime: number; event: string | null; cfg: PitchConfig }) {
   const pos = interpolatePosition(ball.keyframes, currentTime);
@@ -275,16 +335,29 @@ function BallDot({ ball, currentTime, event, cfg }: { ball: BallTrack; currentTi
 
   return (
     <g transform={`translate(${sx},${sy})`}>
-      {event && <circle r={18} fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth={2} filter="url(#event-glow)" />}
+      {event && <circle r={22} fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth={2} filter="url(#event-glow)" />}
       <g filter="url(#ball-shadow)">
-        <circle r={9} fill="white" />
-        <circle r={9} fill="none" stroke="rgba(0,0,0,0.12)" strokeWidth={1} />
-        <line x1={-7} y1={0} x2={7} y2={0} stroke="rgba(0,0,0,0.12)" strokeWidth={0.8} />
-        <line x1={0} y1={-7} x2={0} y2={7} stroke="rgba(0,0,0,0.12)" strokeWidth={0.8} />
-        <circle cx={-2} cy={-2} r={3} fill="rgba(255,255,255,0.25)" />
+        {/* white base */}
+        <circle r={BALL_R} fill="white" />
+        {/* center pentagon */}
+        <polygon points={pentagonPts(0, 0, 4, -90)} fill="rgba(15,15,15,0.85)" />
+        {/* 5 outer pentagons radiating outward */}
+        {OUTER_ANGLES.map(deg => {
+          const rad = deg * (Math.PI / 180);
+          return (
+            <polygon
+              key={deg}
+              points={pentagonPts(7.2 * Math.cos(rad), 7.2 * Math.sin(rad), 2.8, deg + 180)}
+              fill="rgba(15,15,15,0.85)"
+            />
+          );
+        })}
+        <circle r={BALL_R} fill="none" stroke="rgba(0,0,0,0.18)" strokeWidth={0.8} />
+        {/* subtle highlight */}
+        <circle cx={-3} cy={-3.5} r={3} fill="rgba(255,255,255,0.28)" />
       </g>
       {event && (
-        <text y={-18} textAnchor="middle" fontSize="9" fontWeight="800" fill="white" opacity="0.9" style={{ fontFamily: 'system-ui, sans-serif', textTransform: 'uppercase', userSelect: 'none' }}>
+        <text y={-24} textAnchor="middle" fontSize="9" fontWeight="800" fill="white" opacity="0.9" style={{ fontFamily: 'system-ui, sans-serif', textTransform: 'uppercase', userSelect: 'none' }}>
           {event.toUpperCase()}
         </text>
       )}
