@@ -23,13 +23,12 @@ const CONFIGS: Record<GameMode, PitchConfig> = {
   '1v1': { pw: 210, ph: 160, goalH: 22, goalD: 14, goalBoxW: 0,  goalBoxH: 0,   pad: 24, centerR: 0,  stripes: 2 },
 };
 
-const HOME_COLOR   = '#ef4444';
-const AWAY_COLOR   = '#3b82f6';
-const GK_COLOR     = '#84cc16'; // lime green for both GKs
-const HOME_SHORTS  = '#7f1d1d'; // dark red
-const AWAY_SHORTS  = '#1e3a8a'; // dark blue
-const GK_SHORTS    = '#365314'; // dark green
-const PLAYER_R     = 14;
+const HOME_COLOR  = '#ef4444';
+const AWAY_COLOR  = '#3b82f6';
+const GK_COLOR    = '#84cc16';
+const HOME_SHORTS = '#7f1d1d';
+const AWAY_SHORTS = '#1e3a8a';
+const GK_SHORTS   = '#365314';
 
 // Smooth ball trajectory: Catmull-Rom → cubic bezier
 function catmullRomPath(pts: { x: number; y: number }[]): string {
@@ -53,6 +52,13 @@ function catmullRomPath(pts: { x: number; y: number }[]): string {
 // ── Player animation state ────────────────────────────────────────────────────
 type AnimState = 'idle' | 'walk' | 'run' | 'kick' | 'save' | 'dribble' | 'tackle' | 'celebrate';
 
+// x < 0.07 = left goal, x > 0.93 = right goal
+function ballEndsInGoal(ball: BallTrack): boolean {
+  if (ball.keyframes.length === 0) return false;
+  const { x } = ball.keyframes[ball.keyframes.length - 1];
+  return x <= 0.07 || x >= 0.93;
+}
+
 function getAnimState(
   player: PlayerData,
   currentTime: number,
@@ -60,23 +66,55 @@ function getAnimState(
   ballEvent: string | null,
   duration: number,
 ): AnimState {
-  if (currentTime > duration - 1200 && duration > 2000) return 'celebrate';
+  // Celebrate only when ball actually ends up in the goal
+  if (currentTime > duration - 1200 && duration > 2000 && ballEndsInGoal(ball)) return 'celebrate';
 
   const pos     = interpolatePosition(player.keyframes, currentTime);
   const prevPos = interpolatePosition(player.keyframes, Math.max(0, currentTime - 80));
-  const speed   = Math.sqrt((pos.x - prevPos.x) ** 2 + (pos.y - prevPos.y) ** 2);
+  const speed   = Math.hypot(pos.x - prevPos.x, pos.y - prevPos.y);
 
   const ballPos    = interpolatePosition(ball.keyframes, currentTime);
-  const distToBall = Math.sqrt((pos.x - ballPos.x) ** 2 + (pos.y - ballPos.y) ** 2);
+  const distToBall = Math.hypot(pos.x - ballPos.x, pos.y - ballPos.y);
 
   if (player.role === 'GK' && ballEvent === 'shot' && distToBall < 0.2) return 'save';
   if ((ballEvent === 'shot' || ballEvent === 'pass' || ballEvent === 'cross') && distToBall < 0.1) return 'kick';
-  if (ballEvent === 'dribble' && distToBall < 0.08) return 'dribble';
+  if (ballEvent === 'dribble' && distToBall < 0.1) return 'dribble';
   if (speed > 0.01 && distToBall > 0.07 && distToBall < 0.18 &&
       (player.role === 'CB' || player.role === 'CM')) return 'tackle';
   if (speed > 0.007) return 'run';
   if (speed > 0.0015) return 'walk';
   return 'idle';
+}
+
+// During dribble, offset the ball to the dribbling player's feet in their movement direction.
+// Returns offset in SVG units.
+function dribbleOffset(
+  ball: BallTrack,
+  players: PlayerData[],
+  currentTime: number,
+): { sx: number; sy: number } {
+  const ballPos = interpolatePosition(ball.keyframes, currentTime);
+
+  // Find the player closest to the ball
+  let closest: PlayerData | null = null;
+  let closestDist = Infinity;
+  for (const p of players) {
+    const pos = interpolatePosition(p.keyframes, currentTime);
+    const d   = Math.hypot(pos.x - ballPos.x, pos.y - ballPos.y);
+    if (d < closestDist) { closestDist = d; closest = p; }
+  }
+  if (!closest || closestDist > 0.12) return { sx: 0, sy: 0 };
+
+  const pos  = interpolatePosition(closest.keyframes, currentTime);
+  const prev = interpolatePosition(closest.keyframes, Math.max(0, currentTime - 100));
+  const dx   = pos.x - prev.x;
+  const dy   = pos.y - prev.y;
+  const len  = Math.hypot(dx, dy);
+
+  // Push ball forward in movement direction + drop to feet level (+12 SVG units)
+  const fwdSx = len > 0.0005 ? (dx / len) * 9 : 0;
+  const fwdSy = len > 0.0005 ? (dy / len) * 9 : 0;
+  return { sx: fwdSx, sy: fwdSy + 12 };
 }
 
 // Soccer ball pentagon helper
@@ -229,7 +267,15 @@ export default function SoccerPitch({
             {strategy.players.map(player => (
               <PlayerTrajectoryLine key={`traj-${player.id}`} player={player} cfg={cfg} />
             ))}
-            <BallDot ball={strategy.ball} currentTime={currentTime} event={ballEvent} cfg={cfg} />
+            <BallDot
+              ball={strategy.ball}
+              currentTime={currentTime}
+              event={ballEvent}
+              cfg={cfg}
+              offset={ballEvent === 'dribble'
+                ? dribbleOffset(strategy.ball, strategy.players, currentTime)
+                : { sx: 0, sy: 0 }}
+            />
             {strategy.players.map(player => (
               <PlayerSprite
                 key={player.id}
@@ -421,12 +467,18 @@ function BallTrajectoryLine({ ball, cfg }: { ball: BallTrack; cfg: PitchConfig }
 const BALL_R = 11;
 const OUTER_ANGLES = [-90, -18, 54, 126, 198]; // match center pentagon vertices
 
-function BallDot({ ball, currentTime, event, cfg }: { ball: BallTrack; currentTime: number; event: string | null; cfg: PitchConfig }) {
+function BallDot({ ball, currentTime, event, cfg, offset = { sx: 0, sy: 0 } }: {
+  ball: BallTrack;
+  currentTime: number;
+  event: string | null;
+  cfg: PitchConfig;
+  offset?: { sx: number; sy: number };
+}) {
   const pos = interpolatePosition(ball.keyframes, currentTime);
   const { sx, sy } = toSVG(pos.x, pos.y, cfg.pw, cfg.ph);
 
   return (
-    <g transform={`translate(${sx},${sy})`}>
+    <g transform={`translate(${sx + offset.sx},${sy + offset.sy})`}>
       {event && <circle r={22} fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth={2} filter="url(#event-glow)" />}
       <g filter="url(#ball-shadow)">
         {/* white base */}
