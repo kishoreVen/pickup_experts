@@ -12,7 +12,9 @@ interface PromptPanelProps {
   isLoading: boolean;
   error: string | null;
   gameMode: GameMode;
+  homeAttacksRight: boolean;
   onGameModeChange: (mode: GameMode) => void;
+  onToggleDirection: () => void;
   onGenerate: (prompt: string, apiKey?: string) => void;
   onRefine: (prompt: string, apiKey?: string) => void;
   onLoadStrategy: (strategy: Strategy) => void;
@@ -46,7 +48,9 @@ export default function PromptPanel({
   isLoading,
   error,
   gameMode,
+  homeAttacksRight,
   onGameModeChange,
+  onToggleDirection,
   onGenerate,
   onRefine,
   onLoadStrategy,
@@ -158,6 +162,37 @@ export default function PromptPanel({
           {gameMode === '3v3' && '3 outfield + 1 GK each'}
           {gameMode === '1v1' && 'No GK — small goals'}
         </p>
+      </div>
+
+      {/* ── Attack direction ── */}
+      <div className="px-4 py-2 border-b border-[#1a2d22] flex-shrink-0">
+        <p className="text-[9px] font-black text-[#3a5a44] uppercase tracking-widest mb-1.5">Attack Direction</p>
+        <button
+          onClick={onToggleDirection}
+          title="Swap which side each team attacks"
+          className="w-full flex items-center justify-between bg-[#0e1a15] border border-[#1a2d22] hover:border-[#22c55e] rounded-lg px-3 py-1.5 transition-colors group"
+        >
+          {/* left side */}
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: homeAttacksRight ? '#ef4444' : '#3b82f6' }} />
+            <span className="text-[10px] font-black" style={{ color: homeAttacksRight ? '#ef4444' : '#3b82f6' }}>
+              {homeAttacksRight ? 'RED' : 'BLUE'}
+            </span>
+          </div>
+          {/* mini pitch */}
+          <div className="flex items-center gap-0.5 text-[9px] font-black text-[#3a5a44]">
+            <span>{homeAttacksRight ? '→' : '←'}</span>
+            <span className="px-1 border-x border-[#1a2d22] mx-0.5 text-[#22c55e] group-hover:text-white transition-colors">⇄</span>
+            <span>{homeAttacksRight ? '←' : '→'}</span>
+          </div>
+          {/* right side */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-black" style={{ color: homeAttacksRight ? '#3b82f6' : '#ef4444' }}>
+              {homeAttacksRight ? 'BLUE' : 'RED'}
+            </span>
+            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: homeAttacksRight ? '#3b82f6' : '#ef4444' }} />
+          </div>
+        </button>
       </div>
 
       {/* ── Mode tabs ── */}

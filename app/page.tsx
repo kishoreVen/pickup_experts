@@ -12,6 +12,7 @@ import SettingsModal from '@/components/SettingsModal';
 export default function Home() {
   const [strategy, setStrategy] = useState<Strategy>(EXAMPLE_STRATEGY);
   const [gameMode, setGameMode] = useState<GameMode>('5v5');
+  const [homeAttacksRight, setHomeAttacksRight] = useState(true);
   const gameModeRef = useRef<GameMode>('5v5');
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -85,7 +86,7 @@ export default function Home() {
       const res = await fetch('/api/generate-strategy', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ prompt, existingStrategy: existing, gameMode: gameModeRef.current }),
+        body: JSON.stringify({ prompt, existingStrategy: existing, gameMode: gameModeRef.current, homeAttacksRight }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -176,6 +177,7 @@ export default function Home() {
               currentTime={currentTime}
               isEditing={false}
               gameMode={gameMode}
+              homeAttacksRight={homeAttacksRight}
               onPlayerMove={() => {}}
             />
           </div>
@@ -200,7 +202,9 @@ export default function Home() {
             isLoading={isLoading}
             error={error}
             gameMode={gameMode}
+            homeAttacksRight={homeAttacksRight}
             onGameModeChange={setGameMode}
+            onToggleDirection={() => setHomeAttacksRight(v => !v)}
             onGenerate={handleGenerate}
             onRefine={handleRefine}
             onLoadStrategy={handleLoadStrategy}

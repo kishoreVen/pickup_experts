@@ -15,11 +15,12 @@ interface SoccerPitchProps {
   currentTime: number;
   isEditing: boolean;
   gameMode: GameMode;
+  homeAttacksRight?: boolean;
   onPlayerMove: (playerId: string, x: number, y: number) => void;
 }
 
 export default function SoccerPitch({
-  strategy, currentTime, isEditing, gameMode, onPlayerMove,
+  strategy, currentTime, isEditing, gameMode, homeAttacksRight = true, onPlayerMove,
 }: SoccerPitchProps) {
   const cfg        = CONFIGS[gameMode];
   const svgRef     = useRef<SVGSVGElement>(null);
@@ -55,11 +56,13 @@ export default function SoccerPitch({
 
   return (
     <div className="relative w-full h-full flex items-center justify-center select-none">
-      <div className="absolute top-1 left-2 text-[10px] font-black text-[#ef4444] opacity-60 pointer-events-none z-10 uppercase tracking-wider">
-        HOME →
+      <div className="absolute top-1 left-2 text-[10px] font-black opacity-60 pointer-events-none z-10 uppercase tracking-wider"
+           style={{ color: homeAttacksRight ? '#ef4444' : '#3b82f6' }}>
+        {homeAttacksRight ? 'HOME →' : 'AWAY →'}
       </div>
-      <div className="absolute top-1 right-2 text-[10px] font-black text-[#3b82f6] opacity-60 pointer-events-none z-10 uppercase tracking-wider">
-        ← AWAY
+      <div className="absolute top-1 right-2 text-[10px] font-black opacity-60 pointer-events-none z-10 uppercase tracking-wider"
+           style={{ color: homeAttacksRight ? '#3b82f6' : '#ef4444' }}>
+        {homeAttacksRight ? '← AWAY' : '← HOME'}
       </div>
 
       <svg
@@ -101,7 +104,7 @@ export default function SoccerPitch({
           </filter>
         </defs>
 
-        <PitchMarkings cfg={cfg} />
+        <PitchMarkings cfg={cfg} homeAttacksRight={homeAttacksRight} />
 
         {strategy && (
           <>

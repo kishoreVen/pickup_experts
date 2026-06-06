@@ -2,8 +2,11 @@
 
 import { PitchConfig, HOME_COLOR, AWAY_COLOR } from '@/lib/pitch';
 
-export function PitchMarkings({ cfg }: { cfg: PitchConfig }) {
+export function PitchMarkings({ cfg, homeAttacksRight = true }: { cfg: PitchConfig; homeAttacksRight?: boolean }) {
   const { pw, ph, goalH, goalD, goalBoxW, goalBoxH, pad, centerR, stripes } = cfg;
+  // When home attacks right, home defends the left goal (red bar on left post)
+  const leftPostColor  = homeAttacksRight ? HOME_COLOR : AWAY_COLOR;
+  const rightPostColor = homeAttacksRight ? AWAY_COLOR : HOME_COLOR;
   const line  = { stroke: 'rgba(255,255,255,0.82)', strokeWidth: 2, fill: 'none' } as const;
   const thick = { stroke: 'rgba(255,255,255,0.9)',  strokeWidth: 3, fill: 'none' } as const;
   const goalY    = ph / 2 - goalH / 2;
@@ -33,13 +36,13 @@ export function PitchMarkings({ cfg }: { cfg: PitchConfig }) {
       <rect x={-goalD} y={goalY} width={goalD} height={goalH}
             fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.9)" strokeWidth={3} />
       {goalBoxW > 0 && <rect x={0} y={goalBoxY} width={goalBoxW} height={goalBoxH} {...line} />}
-      <rect x={-goalD - 4} y={goalY - 6} width={5} height={goalH + 12} rx={2} fill={HOME_COLOR} opacity={0.7} />
+      <rect x={-goalD - 4} y={goalY - 6} width={5} height={goalH + 12} rx={2} fill={leftPostColor} opacity={0.7} />
 
       {/* right goal */}
       <rect x={pw} y={goalY} width={goalD} height={goalH}
             fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.9)" strokeWidth={3} />
       {goalBoxW > 0 && <rect x={pw - goalBoxW} y={goalBoxY} width={goalBoxW} height={goalBoxH} {...line} />}
-      <rect x={pw + goalD - 1} y={goalY - 6} width={5} height={goalH + 12} rx={2} fill={AWAY_COLOR} opacity={0.7} />
+      <rect x={pw + goalD - 1} y={goalY - 6} width={5} height={goalH + 12} rx={2} fill={rightPostColor} opacity={0.7} />
 
       {/* corner arcs */}
       <path d={`M 8 0 A 8 8 0 0 0 0 8`}               {...line} />

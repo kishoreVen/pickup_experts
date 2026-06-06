@@ -20,8 +20,18 @@ const MODE_RULES: Record<GameMode, { players: string; roles: string; area: strin
   },
 };
 
-function buildSystemPrompt(gameMode: GameMode): string {
+function buildSystemPrompt(gameMode: GameMode, homeAttacksRight: boolean): string {
   const r = MODE_RULES[gameMode];
+
+  const homeHalf   = homeAttacksRight ? 'left half (x < 0.5)'  : 'right half (x > 0.5)';
+  const awayHalf   = homeAttacksRight ? 'right half (x > 0.5)' : 'left half (x < 0.5)';
+  const homeDir    = homeAttacksRight ? 'RIGHT (toward x=1.0)' : 'LEFT (toward x=0.0)';
+  const awayDir    = homeAttacksRight ? 'LEFT (toward x=0.0)'  : 'RIGHT (toward x=1.0)';
+  const homeGKx    = homeAttacksRight ? '0.04' : '0.96';
+  const awayGKx    = homeAttacksRight ? '0.96' : '0.04';
+  const homeGoalX  = homeAttacksRight ? '0.97' : '0.03';
+  const awayGoalX  = homeAttacksRight ? '0.03' : '0.97';
+
   return `You are a soccer tactics analyst. Convert a play description into an animated small-sided strategy.
 
 Return ONLY valid JSON — no markdown fences, no explanation. Match this exact shape:
@@ -46,9 +56,9 @@ Return ONLY valid JSON — no markdown fences, no explanation. Match this exact 
 COORDINATE SYSTEM:
 - x: 0.0 = left goal line, 1.0 = right goal line
 - y: 0.0 = top touchline, 1.0 = bottom touchline
-- HOME attacks RIGHT (toward x=1.0), starts in left half (x < 0.5)
-- AWAY attacks LEFT (toward x=0.0), starts in right half (x > 0.5)
-- Home GK (if present): x ≈ 0.04 · Away GK (if present): x ≈ 0.96
+- HOME attacks ${homeDir}, starts in ${homeHalf}
+- AWAY attacks ${awayDir}, starts in ${awayHalf}
+- Home GK (if present): x ≈ ${homeGKx} · Away GK (if present): x ≈ ${awayGKx}
 
 GAME MODE: ${gameMode}
 PLAYERS: ${r.players}
@@ -64,7 +74,7 @@ RULES:
 - event types: "pass" | "shot" | "cross" | "dribble" | "clearance"
 - Create smooth, realistic paths with 3–5 keyframes per player
 - Attacking players make runs into space; defenders track runners
-- GOAL / SHOT ON TARGET: the ball's FINAL keyframe must be inside the goal mouth. Home team scores (attacks right): x=0.97, y=0.50. Away team scores (attacks left): x=0.03, y=0.50. Mark the second-to-last ball keyframe with event "shot".
+- GOAL / SHOT ON TARGET: ball's FINAL keyframe must be inside the goal mouth. Home scores: x=${homeGoalX}, y=0.50. Away scores: x=${awayGoalX}, y=0.50. Mark the preceding keyframe with event "shot".
 - PASS / CROSS: ball path must go from the kicking player's position to the receiving player's position at the correct time`;
 }
 
@@ -90,7 +100,12 @@ function extractJSON(text: string): unknown {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { prompt, existingStrategy, gameMode = '5v5' } = body as { prompt: string; existingStrategy?: Strategy; gameMode?: GameMode };
+    const { prompt, existingStrategy, gameMode = '5v5', homeAttacksRight = true } = body as {
+      prompt: string;
+      existingStrategy?: Strategy;
+      gameMode?: GameMode;
+      homeAttacksRight?: boolean;
+    };
 
     if (!prompt?.trim()) {
       return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
@@ -116,7 +131,7 @@ export async function POST(request: NextRequest) {
     const message = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 4096,
-      system: buildSystemPrompt(gameMode),
+      system: buildSystemPrompt(gameMode, homeAttacksRight),
       messages: [{ role: 'user', content: userMessage }],
     });
 
