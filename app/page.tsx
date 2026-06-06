@@ -9,11 +9,26 @@ import AnimationControls from '@/components/AnimationControls';
 import PromptPanel from '@/components/PromptPanel';
 import SettingsModal from '@/components/SettingsModal';
 
+/**
+ * Scans a prompt for natural-language attack-direction cues.
+ * Returns true (home attacks right), false (home attacks left), or null (no cue found).
+ * Examples: "red attacks left", "home going right", "blue attacks right"
+ */
+function parseAttackDirection(prompt: string): boolean | null {
+  const p = prompt.toLowerCase();
+  if (/(home|red).{0,25}(attack|go|play|start).{0,10}right/.test(p)) return true;
+  if (/(home|red).{0,25}(attack|go|play|start).{0,10}left/.test(p))  return false;
+  if (/(away|blue).{0,25}(attack|go|play|start).{0,10}left/.test(p)) return true;
+  if (/(away|blue).{0,25}(attack|go|play|start).{0,10}right/.test(p)) return false;
+  return null;
+}
+
 export default function Home() {
   const [strategy, setStrategy] = useState<Strategy>(EXAMPLE_STRATEGY);
   const [gameMode, setGameMode] = useState<GameMode>('5v5');
   const [homeAttacksRight, setHomeAttacksRight] = useState(true);
-  const gameModeRef = useRef<GameMode>('5v5');
+  const gameModeRef        = useRef<GameMode>('5v5');
+  const homeAttacksRightRef = useRef(true);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
@@ -22,11 +37,12 @@ export default function Home() {
   const [toast, setToast] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
 
-  const rafRef = useRef<number>(0);
+  const rafRef    = useRef<number>(0);
   const lastTsRef = useRef<number | undefined>(undefined);
 
-  // Keep ref in sync so callAPI useCallbacks always see the latest mode
+  // Keep refs in sync so callAPI always sees the latest values
   useEffect(() => { gameModeRef.current = gameMode; }, [gameMode]);
+  useEffect(() => { homeAttacksRightRef.current = homeAttacksRight; }, [homeAttacksRight]);
 
   // ── Animation loop ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -77,6 +93,13 @@ export default function Home() {
   };
 
   const callAPI = async (prompt: string, existing?: Strategy, apiKey?: string) => {
+    // Detect attack direction from natural language before the async state update lands
+    const detected = parseAttackDirection(prompt);
+    if (detected !== null) {
+      homeAttacksRightRef.current = detected;
+      setHomeAttacksRight(detected);
+    }
+
     setIsLoading(true);
     setError(null);
     try {
@@ -86,7 +109,12 @@ export default function Home() {
       const res = await fetch('/api/generate-strategy', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ prompt, existingStrategy: existing, gameMode: gameModeRef.current, homeAttacksRight }),
+        body: JSON.stringify({
+          prompt,
+          existingStrategy: existing,
+          gameMode: gameModeRef.current,
+          homeAttacksRight: homeAttacksRightRef.current,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
