@@ -203,6 +203,7 @@ export default function Home() {
             <SoccerPitch
               strategy={strategy}
               currentTime={currentTime}
+              isPlaying={isPlaying}
               isEditing={false}
               gameMode={gameMode}
               homeAttacksRight={homeAttacksRight}

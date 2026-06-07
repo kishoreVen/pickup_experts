@@ -13,6 +13,7 @@ import { PlayerTrajectoryLine, BallTrajectoryLine } from './pitch/TrajectoryLine
 interface SoccerPitchProps {
   strategy: Strategy | null;
   currentTime: number;
+  isPlaying: boolean;
   isEditing: boolean;
   gameMode: GameMode;
   homeAttacksRight?: boolean;
@@ -20,7 +21,7 @@ interface SoccerPitchProps {
 }
 
 export default function SoccerPitch({
-  strategy, currentTime, isEditing, gameMode, homeAttacksRight = true, onPlayerMove,
+  strategy, currentTime, isPlaying, isEditing, gameMode, homeAttacksRight = true, onPlayerMove,
 }: SoccerPitchProps) {
   const cfg        = CONFIGS[gameMode];
   const svgRef     = useRef<SVGSVGElement>(null);
@@ -108,8 +109,8 @@ export default function SoccerPitch({
 
         {strategy && (
           <>
-            <BallTrajectoryLine ball={strategy.ball} cfg={cfg} />
-            {strategy.players.map(player => (
+            {!isPlaying && <BallTrajectoryLine ball={strategy.ball} cfg={cfg} />}
+            {!isPlaying && strategy.players.map(player => (
               <PlayerTrajectoryLine key={`traj-${player.id}`} player={player} cfg={cfg} />
             ))}
             <BallDot
