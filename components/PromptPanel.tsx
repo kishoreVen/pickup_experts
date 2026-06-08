@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Loader2, Wand2, RefreshCw, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { Loader2, Wand2, RefreshCw, ChevronDown, ChevronUp, Trash2, Shuffle } from 'lucide-react';
 import { GameMode, Strategy } from '@/lib/types';
 import { getFormation } from '@/lib/strategyUtils';
 import { useSettings } from '@/hooks/useSettings';
@@ -17,6 +17,8 @@ interface PromptPanelProps {
   onToggleDirection: () => void;
   onGenerate: (prompt: string, apiKey?: string) => void;
   onRefine: (prompt: string, apiKey?: string) => void;
+  onRandomize: (apiKey?: string) => void;
+  generatedQuery?: string;
   onLoadStrategy: (strategy: Strategy) => void;
 }
 
@@ -53,6 +55,8 @@ export default function PromptPanel({
   onToggleDirection,
   onGenerate,
   onRefine,
+  onRandomize,
+  generatedQuery,
   onLoadStrategy,
 }: PromptPanelProps) {
   const { apiKey } = useSettings();
@@ -73,6 +77,10 @@ export default function PromptPanel({
       setPlays(saved);
     } catch { setPlays([]); }
   }, [tab]);
+
+  useEffect(() => {
+    if (generatedQuery) setPrompt(generatedQuery);
+  }, [generatedQuery]);
 
   const handleDeletePlay = (id: string) => {
     try {
@@ -339,36 +347,50 @@ export default function PromptPanel({
                 }
               }}
             />
-            <button
-              type="submit"
-              disabled={isLoading || !prompt.trim()}
-              style={{
-                background: isLoading
-                  ? '#1a2d22'
-                  : tab === 'refine'
-                  ? '#f97316'
-                  : '#22c55e',
-                color: isLoading ? '#5a7a64' : '#000',
-              }}
-              className="w-full mt-2 py-2.5 rounded-lg text-[11px] font-black uppercase tracking-widest transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 size={12} className="animate-spin" />
-                  Generating…
-                </>
-              ) : tab === 'refine' ? (
-                <>
-                  <RefreshCw size={12} />
-                  Refine Play
-                </>
-              ) : (
-                <>
-                  <Wand2 size={12} />
-                  Generate Play
-                </>
+            <div className="flex gap-2 mt-2">
+              <button
+                type="submit"
+                disabled={isLoading || !prompt.trim()}
+                style={{
+                  background: isLoading
+                    ? '#1a2d22'
+                    : tab === 'refine'
+                    ? '#f97316'
+                    : '#22c55e',
+                  color: isLoading ? '#5a7a64' : '#000',
+                }}
+                className="flex-1 py-2.5 rounded-lg text-[11px] font-black uppercase tracking-widest transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin" />
+                    Generating…
+                  </>
+                ) : tab === 'refine' ? (
+                  <>
+                    <RefreshCw size={12} />
+                    Refine
+                  </>
+                ) : (
+                  <>
+                    <Wand2 size={12} />
+                    Generate
+                  </>
+                )}
+              </button>
+
+              {tab === 'generate' && (
+                <button
+                  type="button"
+                  disabled={isLoading}
+                  onClick={() => onRandomize(apiKey || undefined)}
+                  title="Generate a random play"
+                  className="px-3 py-2.5 rounded-lg border border-[#1a2d22] text-[#5a7a64] hover:text-white hover:border-[#22c55e] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                >
+                  <Shuffle size={13} />
+                </button>
               )}
-            </button>
+            </div>
           </form>
         </div>
       )}

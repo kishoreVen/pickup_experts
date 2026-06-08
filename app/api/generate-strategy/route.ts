@@ -1,101 +1,85 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
-import { GameMode, Strategy } from '@/lib/types';
+import { GameMode, PlayOutcome, PlayRole, Strategy, TacticalPlan } from '@/lib/types';
+import { renderPrompt } from '@/lib/renderPrompt';
 
 const MODE_RULES: Record<GameMode, { players: string; roles: string; area: string }> = {
   '5v5': {
     players: 'Exactly 6 players per team: 1 GK + 5 outfield (e.g. 2 CB, 1 CM, 2 ST).',
-    roles:   'GK CB CM ST — keep it simple',
-    area:    'Field is 40m×25m. Keep play compact: x 0.05–0.95, y 0.05–0.95. Small goal area at x<0.12 (home) and x>0.88 (away).',
+    roles:   'GK CB CM ST',
+    area:    'Field 40m×25m — compact play. Goal mouth sits between y≈0.43 and y≈0.57.',
   },
   '3v3': {
     players: 'Exactly 4 players per team: 1 GK + 3 outfield (e.g. 1 CB, 1 CM, 1 ST).',
     roles:   'GK CB CM ST',
-    area:    'Field is 30m×20m. Keep play very compact: x 0.08–0.92, y 0.08–0.92. Tight spaces.',
+    area:    'Field 30m×20m — very compact. Goal mouth y≈0.43–0.57.',
   },
   '1v1': {
     players: 'Exactly 1 player per team — NO goalkeeper. Each player attacks the opponent\'s small goal.',
-    roles:   'ST (one player per team)',
-    area:    'Field is 20m×15m. Play is in the centre: x 0.15–0.85, y 0.15–0.85. Goals are small and centered.',
+    roles:   'ST',
+    area:    'Field 20m×15m — small central goals.',
   },
 };
 
-function buildSystemPrompt(gameMode: GameMode, homeAttacksRight: boolean): string {
+// ── Prompt context builders ───────────────────────────────────────────────────
+
+function planContext(gameMode: GameMode, homeAttacksRight: boolean): Record<string, unknown> {
   const r = MODE_RULES[gameMode];
-
-  const homeHalf   = homeAttacksRight ? 'left half (x < 0.5)'  : 'right half (x > 0.5)';
-  const awayHalf   = homeAttacksRight ? 'right half (x > 0.5)' : 'left half (x < 0.5)';
-  const homeDir    = homeAttacksRight ? 'RIGHT (toward x=1.0)' : 'LEFT (toward x=0.0)';
-  const awayDir    = homeAttacksRight ? 'LEFT (toward x=0.0)'  : 'RIGHT (toward x=1.0)';
-  const homeGKx    = homeAttacksRight ? '0.04' : '0.96';
-  const awayGKx    = homeAttacksRight ? '0.96' : '0.04';
-  const homeGoalX  = homeAttacksRight ? '0.97' : '0.03';
-  const awayGoalX  = homeAttacksRight ? '0.03' : '0.97';
-
-  return `You are a soccer tactics analyst. Convert a play description into an animated small-sided strategy.
-
-Return ONLY valid JSON — no markdown fences, no explanation. Match this exact shape:
-{
-  "title": "Strategy name (max 40 chars)",
-  "description": "One-sentence summary (max 100 chars)",
-  "duration": 8000,
-  "homePlayers": [
-    { "id": "h1", "number": 9, "role": "ST", "keyframes": [{"time": 0, "x": 0.35, "y": 0.50}, {"time": 4000, "x": 0.75, "y": 0.40}] }
-  ],
-  "awayPlayers": [
-    { "id": "a1", "number": 9, "role": "ST", "keyframes": [{"time": 0, "x": 0.65, "y": 0.50}] }
-  ],
-  "ball": {
-    "keyframes": [
-      {"time": 0, "x": 0.35, "y": 0.50},
-      {"time": 3000, "x": 0.70, "y": 0.40, "event": "pass"}
-    ]
-  }
+  return {
+    gameMode,
+    homeDir: homeAttacksRight ? 'RIGHT' : 'LEFT',
+    awayDir: homeAttacksRight ? 'LEFT'  : 'RIGHT',
+    players: r.players,
+    roles:   r.roles,
+    area:    r.area,
+  };
 }
 
-COORDINATE SYSTEM:
-- x: 0.0 = left goal line, 1.0 = right goal line
-- y: 0.0 = top touchline, 1.0 = bottom touchline
-- HOME attacks ${homeDir}, starts in ${homeHalf}
-- AWAY attacks ${awayDir}, starts in ${awayHalf}
-- Home GK (if present): x ≈ ${homeGKx} · Away GK (if present): x ≈ ${awayGKx}
-
-GAME MODE: ${gameMode}
-PLAYERS: ${r.players}
-ROLES: ${r.roles}
-FIELD: ${r.area}
-
-RULES:
-- Player IDs: home = "h1", "h2"…, away = "a1", "a2"…
-- duration: 5000–10000 ms
-- First keyframe per player must be time=0
-- Clamp positions: x 0.02–0.98, y 0.04–0.96
-- Ball keyframes must spatially match the player holding/kicking it
-- event types: "pass" | "shot" | "cross" | "dribble" | "clearance"
-- Create smooth, realistic paths with 3–5 keyframes per player
-- Attacking players make runs into space; defenders track runners
-- GOAL / SHOT ON TARGET: ball's FINAL keyframe must be inside the goal mouth. Home scores: x=${homeGoalX}, y=0.50. Away scores: x=${awayGoalX}, y=0.50. Mark the preceding keyframe with event "shot".
-- PASS / CROSS: ball path must go from the kicking player's position to the receiving player's position at the correct time`;
+function animateContext(gameMode: GameMode, homeAttacksRight: boolean): Record<string, unknown> {
+  const r = MODE_RULES[gameMode];
+  const h = homeAttacksRight;
+  return {
+    gameMode,
+    homeDir:        h ? 'RIGHT (toward x=1.0)' : 'LEFT (toward x=0.0)',
+    awayDir:        h ? 'LEFT (toward x=0.0)'  : 'RIGHT (toward x=1.0)',
+    homeGKx:        h ? '0.04' : '0.96',
+    awayGKx:        h ? '0.96' : '0.04',
+    homeGoalLineX:  h ? '0.97' : '0.03',
+    awayGoalLineX:  h ? '0.03' : '0.97',
+    homeGoalDeepX:  h ? '1.03' : '-0.03',
+    awayGoalDeepX:  h ? '-0.03' : '1.03',
+    homeSaveX:      h ? '0.88–0.93' : '0.07–0.12',
+    awaySaveX:      h ? '0.07–0.12' : '0.88–0.93',
+    homeBlockX:     h ? '0.78–0.87' : '0.13–0.22',
+    awayBlockX:     h ? '0.13–0.22' : '0.78–0.87',
+    homePostRebound: h ? '0.88' : '0.12',
+    awayPostRebound: h ? '0.12' : '0.88',
+    homeTerribleX:  h ? '0.80' : '0.20',
+    awayTerribleX:  h ? '0.20' : '0.80',
+    homeZones: h
+      ? "own goal area≈0.04 | own box≈0.05–0.18 | defensive third≈0.05–0.33 | own half≈0.05–0.50 | center≈0.50 | opponent's half≈0.50–0.95 | attacking third≈0.67–0.95 | opponent's box≈0.78–0.95 | opponent's goal≈0.97"
+      : "own goal area≈0.96 | own box≈0.82–0.95 | defensive third≈0.67–0.95 | own half≈0.50–0.95 | center≈0.50 | opponent's half≈0.05–0.50 | attacking third≈0.05–0.33 | opponent's box≈0.05–0.22 | opponent's goal≈0.03",
+    awayZones: h
+      ? "own goal area≈0.96 | own box≈0.82–0.95 | defensive third≈0.67–0.95 | own half≈0.50–0.95 | attacking third≈0.05–0.33 | opponent's box≈0.05–0.22"
+      : "own goal area≈0.04 | own box≈0.05–0.18 | defensive third≈0.05–0.33 | own half≈0.05–0.50 | attacking third≈0.67–0.95 | opponent's box≈0.78–0.95",
+    yZones: 'upper channel≈0.20 | upper-center≈0.35 | center≈0.50 | lower-center≈0.65 | lower channel≈0.80',
+    players: r.players,
+    area:    r.area,
+  };
 }
+
+// ── JSON extraction ───────────────────────────────────────────────────────────
 
 function extractJSON(text: string): unknown {
-  // Direct parse
   try { return JSON.parse(text); } catch { /* continue */ }
-
-  // Strip markdown code fences
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenced) {
-    try { return JSON.parse(fenced[1].trim()); } catch { /* continue */ }
-  }
-
-  // Grab the first top-level JSON object
+  if (fenced) { try { return JSON.parse(fenced[1].trim()); } catch { /* continue */ } }
   const obj = text.match(/\{[\s\S]*\}/);
-  if (obj) {
-    try { return JSON.parse(obj[0]); } catch { /* continue */ }
-  }
-
+  if (obj)    { try { return JSON.parse(obj[0]); }            catch { /* continue */ } }
   throw new Error('No valid JSON found in AI response');
 }
+
+// ── Route handler ─────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
   try {
@@ -111,66 +95,112 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
     }
 
-    // ── Determine API key ────────────────────────────────────────────────────
-    // Priority 1: user-supplied key from Settings, Priority 2: server .env key
     const anthropicApiKey = request.headers.get('x-api-key') || process.env.ANTHROPIC_API_KEY;
     if (!anthropicApiKey) {
       return NextResponse.json(
         { error: 'No API key configured. Add your Anthropic API key in Settings.' },
-        { status: 503 }
+        { status: 503 },
       );
     }
 
-    // ── Call Claude ──────────────────────────────────────────────────────────
-    const userMessage = existingStrategy
-      ? `Refine this existing ${gameMode} strategy.\n\nRefinement request: ${prompt}\n\nCurrent strategy JSON:\n${JSON.stringify(existingStrategy, null, 2)}`
-      : `Create an animated ${gameMode} strategy for: ${prompt}`;
-
     const client = new Anthropic({ apiKey: anthropicApiKey });
 
-    const message = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
-      system: buildSystemPrompt(gameMode, homeAttacksRight),
-      messages: [{ role: 'user', content: userMessage }],
+    // ── Refinement: single call using existing plan as context ────────────────
+    if (existingStrategy) {
+      const refineMsg = `Refine this existing ${gameMode} strategy.\n\nRequest: ${prompt}\n\nCurrent strategy:\n${JSON.stringify(existingStrategy, null, 2)}`;
+      const msg = await client.messages.create({
+        model:      'claude-sonnet-4-6',
+        max_tokens: 4096,
+        system:     renderPrompt('animate.njk', animateContext(gameMode, homeAttacksRight)),
+        messages:   [{ role: 'user', content: refineMsg }],
+      });
+      const block = msg.content[0];
+      if (block.type !== 'text') throw new Error('Unexpected response type from AI');
+      const raw = extractJSON(block.text) as RawAnimation;
+      return NextResponse.json({ strategy: assembleStrategy(raw, existingStrategy.plan, prompt, gameMode) });
+    }
+
+    // ── Generate: call 1 — tactical plan ─────────────────────────────────────
+    const planMsg = await client.messages.create({
+      model:      'claude-sonnet-4-6',
+      max_tokens: 2048,
+      system:     renderPrompt('plan.njk', planContext(gameMode, homeAttacksRight)),
+      messages:   [{ role: 'user', content: `Create a tactical plan for: ${prompt}` }],
     });
+    const planBlock = planMsg.content[0];
+    if (planBlock.type !== 'text') throw new Error('Unexpected plan response from AI');
+    const plan = extractJSON(planBlock.text) as TacticalPlan;
 
-    const firstBlock = message.content[0];
-    if (firstBlock.type !== 'text') throw new Error('Unexpected response type from AI');
+    // ── Generate: call 2 — animation from plan ────────────────────────────────
+    const animMsg = await client.messages.create({
+      model:      'claude-sonnet-4-6',
+      max_tokens: 4096,
+      system:     renderPrompt('animate.njk', animateContext(gameMode, homeAttacksRight)),
+      messages:   [{ role: 'user', content: `Animate this tactical plan:\n\n${JSON.stringify(plan, null, 2)}` }],
+    });
+    const animBlock = animMsg.content[0];
+    if (animBlock.type !== 'text') throw new Error('Unexpected animation response from AI');
+    const raw = extractJSON(animBlock.text) as RawAnimation;
 
-    const raw = extractJSON(firstBlock.text) as {
-      title: string;
-      description: string;
-      duration: number;
-      homePlayers: { id: string; number: number; role: string; keyframes: { time: number; x: number; y: number }[] }[];
-      awayPlayers: { id: string; number: number; role: string; keyframes: { time: number; x: number; y: number }[] }[];
-      ball: { keyframes: { time: number; x: number; y: number; event?: string }[] };
-    };
+    return NextResponse.json({ strategy: assembleStrategy(raw, plan, prompt, gameMode) });
 
-    const strategy: Strategy = {
-      id: `strategy_${Date.now()}`,
-      title: raw.title,
-      description: raw.description,
-      duration: raw.duration,
-      players: [
-        ...(raw.homePlayers ?? []).map(p => ({ ...p, team: 'home' as const })),
-        ...(raw.awayPlayers ?? []).map(p => ({ ...p, team: 'away' as const })),
-      ],
-      ball: {
-        keyframes: raw.ball.keyframes.map(kf => ({
-          ...kf,
-          event: kf.event as 'pass' | 'shot' | 'cross' | 'dribble' | 'clearance' | undefined,
-        })),
-      },
-      prompt,
-      gameMode,
-      createdAt: new Date().toISOString(),
-    };
-
-    return NextResponse.json({ strategy });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to generate strategy';
     console.error('[generate-strategy]', err);
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+// ── Types & assembly helpers ──────────────────────────────────────────────────
+
+type RawPlayer = { id: string; number: number; role: string; playRole?: string; keyframes: { time: number; x: number; y: number }[] };
+type RawAnimation = {
+  title: string;
+  description: string;
+  duration: number;
+  homePlayers: RawPlayer[];
+  awayPlayers: RawPlayer[];
+  ball: { keyframes: { time: number; x: number; y: number; event?: string }[] };
+};
+
+function assembleStrategy(
+  raw: RawAnimation,
+  plan: TacticalPlan | undefined,
+  prompt: string,
+  gameMode: GameMode,
+): Strategy {
+  const outcome      = plan?.outcome as PlayOutcome | undefined;
+  const attackingTeam = plan?.attackingTeam;
+  const isGoal  = outcome === 'goal_clean' || outcome === 'goal_rebound' || outcome === 'own_goal';
+  const isNoGoal = outcome === 'no_goal_saved' || outcome === 'no_goal_blocked' ||
+                   outcome === 'no_goal_post'  || outcome === 'no_goal_close'   ||
+                   outcome === 'no_goal_terrible';
+  // For goals: attacking team scores. For no-goals: defending team wins the moment.
+  const scoringTeam: 'home' | 'away' | undefined =
+    isGoal   && attackingTeam ? attackingTeam :
+    isNoGoal && attackingTeam ? (attackingTeam === 'home' ? 'away' : 'home') :
+    undefined;
+
+  return {
+    id:          `strategy_${Date.now()}`,
+    title:       raw.title,
+    description: raw.description,
+    duration:    raw.duration,
+    outcome,
+    scoringTeam,
+    plan,
+    players: [
+      ...(raw.homePlayers ?? []).map(p => ({ ...p, playRole: p.playRole as PlayRole | undefined, team: 'home' as const })),
+      ...(raw.awayPlayers ?? []).map(p => ({ ...p, playRole: p.playRole as PlayRole | undefined, team: 'away' as const })),
+    ],
+    ball: {
+      keyframes: raw.ball.keyframes.map(kf => ({
+        ...kf,
+        event: kf.event as 'pass' | 'shot' | 'cross' | 'dribble' | 'clearance' | undefined,
+      })),
+    },
+    prompt,
+    gameMode,
+    createdAt: new Date().toISOString(),
+  };
 }

@@ -14,10 +14,11 @@ export interface BallDotProps {
   event: string | null;
   cfg: PitchConfig;
   offset?: { sx: number; sy: number };
+  posOverride?: { x: number; y: number };
 }
 
-export function BallDot({ ball, currentTime, event, cfg, offset }: BallDotProps) {
-  const pos        = interpolatePosition(ball.keyframes, currentTime);
+export function BallDot({ ball, currentTime, event, cfg, offset, posOverride }: BallDotProps) {
+  const pos        = posOverride ?? interpolatePosition(ball.keyframes, currentTime);
   const { sx, sy } = toSVG(pos.x, pos.y, cfg.pw, cfg.ph);
   const ox         = offset?.sx ?? 0;
   const oy         = offset?.sy ?? 0;

@@ -1,27 +1,40 @@
 'use client';
 
 import { useRef, useCallback } from 'react';
-import { GameMode, Strategy } from '@/lib/types';
+import { GameMode, Strategy, PlayOutcome } from '@/lib/types';
 import { CONFIGS, HOME_COLOR, AWAY_COLOR, svgPoint } from '@/lib/pitch';
 import { nearestBallEvent, SPRITE_KEYFRAMES } from '@/lib/animation';
-import { dribbleOffset } from '@/lib/physics';
+import { dribbleOffset, carrierSnapPos } from '@/lib/physics';
 import { PlayerSprite } from './sprites/PlayerSprite';
 import { BallDot } from './sprites/BallDot';
 import { PitchMarkings } from './pitch/PitchMarkings';
-import { PlayerTrajectoryLine, BallTrajectoryLine } from './pitch/TrajectoryLines';
 
 interface SoccerPitchProps {
   strategy: Strategy | null;
   currentTime: number;
-  isPlaying: boolean;
+
   isEditing: boolean;
   gameMode: GameMode;
   homeAttacksRight?: boolean;
   onPlayerMove: (playerId: string, x: number, y: number) => void;
 }
 
+function getFlashInfo(outcome?: PlayOutcome): { label: string; color: string } | null {
+  switch (outcome) {
+    case 'goal_clean':       return { label: 'GOAL!',         color: '#22c55e' };
+    case 'goal_rebound':     return { label: 'GOAL!',         color: '#22c55e' };
+    case 'own_goal':         return { label: 'OWN GOAL!',     color: '#f97316' };
+    case 'no_goal_saved':    return { label: 'SAVED!',        color: '#3b82f6' };
+    case 'no_goal_blocked':  return { label: 'BLOCKED!',      color: '#3b82f6' };
+    case 'no_goal_post':     return { label: 'OFF THE POST!', color: '#f97316' };
+    case 'no_goal_close':    return { label: 'MISSED!',       color: '#ef4444' };
+    case 'no_goal_terrible': return { label: 'MISSED!',       color: '#ef4444' };
+    default:                 return null;
+  }
+}
+
 export default function SoccerPitch({
-  strategy, currentTime, isPlaying, isEditing, gameMode, homeAttacksRight = true, onPlayerMove,
+  strategy, currentTime, isEditing, gameMode, homeAttacksRight = true, onPlayerMove,
 }: SoccerPitchProps) {
   const cfg        = CONFIGS[gameMode];
   const svgRef     = useRef<SVGSVGElement>(null);
@@ -50,10 +63,18 @@ export default function SoccerPitch({
   const handlePointerUp = useCallback(() => { draggingId.current = null; }, []);
 
   const viewBox    = `${-cfg.pad} ${-cfg.pad} ${cfg.pw + cfg.pad * 2} ${cfg.ph + cfg.pad * 2}`;
-  const ballEvent  = strategy ? nearestBallEvent(strategy.ball, currentTime) : null;
-  const ballOffset = strategy && ballEvent === 'dribble'
+  const ballEvent    = strategy ? nearestBallEvent(strategy.ball, currentTime) : null;
+  const ballSnapPos  = strategy
+    ? (carrierSnapPos(strategy.ball, strategy.players, currentTime) ?? undefined)
+    : undefined;
+  // Only apply foot-offset when not already snapped — avoids double-correction jitter
+  const ballOffset   = !ballSnapPos && strategy && ballEvent === 'dribble'
     ? dribbleOffset(strategy.ball, strategy.players, currentTime)
     : undefined;
+
+  const flashInfo = getFlashInfo(strategy?.outcome);
+  const showFlash = !!strategy && !!flashInfo &&
+    currentTime > strategy.duration - 1800 && currentTime < strategy.duration - 700;
 
   return (
     <div className="relative w-full h-full flex items-center justify-center select-none">
@@ -109,16 +130,13 @@ export default function SoccerPitch({
 
         {strategy && (
           <>
-            {!isPlaying && <BallTrajectoryLine ball={strategy.ball} cfg={cfg} />}
-            {!isPlaying && strategy.players.map(player => (
-              <PlayerTrajectoryLine key={`traj-${player.id}`} player={player} cfg={cfg} />
-            ))}
             <BallDot
               ball={strategy.ball}
               currentTime={currentTime}
               event={ballEvent}
               cfg={cfg}
               offset={ballOffset}
+              posOverride={ballSnapPos}
             />
             {strategy.players.map(player => (
               <PlayerSprite
@@ -128,6 +146,8 @@ export default function SoccerPitch({
                 ball={strategy.ball}
                 ballEvent={ballEvent}
                 duration={strategy.duration}
+                outcome={strategy.outcome}
+                scoringTeam={strategy.scoringTeam}
                 cfg={cfg}
                 isEditing={isEditing}
                 isDragging={draggingId.current === player.id}
@@ -150,6 +170,21 @@ export default function SoccerPitch({
           </g>
         )}
       </svg>
+
+      {showFlash && flashInfo && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+          <span
+            className="font-black uppercase tracking-widest animate-pulse select-none"
+            style={{
+              fontSize: 'clamp(2rem, 8vw, 5.5rem)',
+              color: flashInfo.color,
+              textShadow: `0 0 50px ${flashInfo.color}, 0 0 100px ${flashInfo.color}66`,
+            }}
+          >
+            {flashInfo.label}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

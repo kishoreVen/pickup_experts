@@ -35,6 +35,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [generatedQuery, setGeneratedQuery] = useState<string | undefined>();
   const [showSettings, setShowSettings] = useState(false);
 
   const rafRef    = useRef<number>(0);
@@ -144,6 +145,29 @@ export default function Home() {
     [strategy]
   );
 
+  const handleRandomize = useCallback(async (apiKey?: string) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['x-api-key'] = apiKey;
+      const res = await fetch('/api/random-query', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ gameMode: gameModeRef.current }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to get random query');
+      const query = data.query as string;
+      setGeneratedQuery(query);
+      await callAPI(query, undefined, apiKey);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to randomize');
+      setIsLoading(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleLoadStrategy = useCallback((s: Strategy) => {
     setStrategy(s);
     if (s.gameMode) setGameMode(s.gameMode);
@@ -203,7 +227,6 @@ export default function Home() {
             <SoccerPitch
               strategy={strategy}
               currentTime={currentTime}
-              isPlaying={isPlaying}
               isEditing={false}
               gameMode={gameMode}
               homeAttacksRight={homeAttacksRight}
@@ -236,6 +259,8 @@ export default function Home() {
             onToggleDirection={() => setHomeAttacksRight(v => !v)}
             onGenerate={handleGenerate}
             onRefine={handleRefine}
+            onRandomize={handleRandomize}
+            generatedQuery={generatedQuery}
             onLoadStrategy={handleLoadStrategy}
           />
         </div>

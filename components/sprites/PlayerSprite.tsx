@@ -1,9 +1,10 @@
 'use client';
 
-import { PlayerData, BallTrack } from '@/lib/types';
+import { PlayerData, BallTrack, PlayOutcome } from '@/lib/types';
 import { PitchConfig, toSVG, HOME_COLOR, AWAY_COLOR, GK_COLOR, HOME_SHORTS, AWAY_SHORTS, GK_SHORTS } from '@/lib/pitch';
 import { getAnimState } from '@/lib/animation';
 import { interpolatePosition } from '@/lib/strategyUtils';
+import { gkTrackPos } from '@/lib/physics';
 
 export interface PlayerSpriteProps {
   player: PlayerData;
@@ -11,6 +12,8 @@ export interface PlayerSpriteProps {
   ball: BallTrack;
   ballEvent: string | null;
   duration: number;
+  outcome?: PlayOutcome;
+  scoringTeam?: 'home' | 'away';
   cfg: PitchConfig;
   isEditing: boolean;
   isDragging: boolean;
@@ -18,7 +21,7 @@ export interface PlayerSpriteProps {
 }
 
 export function PlayerSprite({
-  player, currentTime, ball, ballEvent, duration,
+  player, currentTime, ball, ballEvent, duration, outcome, scoringTeam,
   cfg, isEditing, isDragging, onPointerDown,
 }: PlayerSpriteProps) {
   const color  = player.team === 'home' ? HOME_COLOR : AWAY_COLOR;
@@ -27,31 +30,36 @@ export function PlayerSprite({
   const shorts = isGK ? GK_SHORTS : (player.team === 'home' ? HOME_SHORTS : AWAY_SHORTS);
   const glowId = `glow-${player.team}`;
 
-  const pos        = interpolatePosition(player.keyframes, currentTime);
+  const rawPos     = interpolatePosition(player.keyframes, currentTime);
+  const tracked    = gkTrackPos(player, ball, currentTime);
+  const pos        = tracked ?? rawPos;
   const { sx, sy } = toSVG(pos.x, pos.y, cfg.pw, cfg.ph);
-  const anim       = getAnimState(player, currentTime, ball, ballEvent, duration);
+  const anim       = getAnimState(player, currentTime, ball, ballEvent, duration, outcome, scoringTeam);
   const walkDur    = anim === 'run' || anim === 'tackle' ? '0.25s' : '0.5s';
   const isMoving   = anim === 'walk' || anim === 'run' || anim === 'dribble' || anim === 'tackle';
 
   const bodyGroup: React.CSSProperties = {
     transformBox: 'fill-box', transformOrigin: '50% 50%',
     animation:
-      anim === 'celebrate' ? 'cel-jump 0.38s infinite ease-in-out' :
-      anim === 'tackle'    ? 'tackle-lean 0.4s 3 ease-in-out'      :
-      anim === 'dribble'   ? 'drib-sway 0.35s infinite ease-in-out':
+      anim === 'celebrate' ? 'cel-jump 0.38s infinite ease-in-out'     :
+      anim === 'tackle'    ? 'tackle-lean 0.4s 3 ease-in-out'          :
+      anim === 'dribble'   ? 'drib-sway 0.35s infinite ease-in-out'    :
       isMoving             ? `body-bob ${walkDur} infinite ease-in-out` : 'none',
   };
+  // Dejected arms droop statically — no animation, just a downward transform
   const armL: React.CSSProperties = {
     transformBox: 'fill-box', transformOrigin: '100% 0%',
-    animation:
-      anim === 'save'      ? 'save-armL 0.5s ease-out forwards'        :
-      anim === 'celebrate' ? 'cel-armL 0.38s infinite ease-in-out'     : 'none',
+    ...(anim === 'save'      ? { animation: 'save-armL 0.5s ease-out forwards' }           :
+        anim === 'celebrate' ? { animation: 'cel-armL 0.38s infinite ease-in-out' }        :
+        anim === 'dejected'  ? { animation: 'none', transform: 'translate(2px,8px) rotate(40deg)' } :
+        { animation: 'none' }),
   };
   const armR: React.CSSProperties = {
     transformBox: 'fill-box', transformOrigin: '0% 0%',
-    animation:
-      anim === 'save'      ? 'save-armR 0.5s ease-out forwards'        :
-      anim === 'celebrate' ? 'cel-armR 0.38s infinite ease-in-out'     : 'none',
+    ...(anim === 'save'      ? { animation: 'save-armR 0.5s ease-out forwards' }            :
+        anim === 'celebrate' ? { animation: 'cel-armR 0.38s infinite ease-in-out' }         :
+        anim === 'dejected'  ? { animation: 'none', transform: 'translate(-2px,8px) rotate(-40deg)' } :
+        { animation: 'none' }),
   };
   const legL: React.CSSProperties = {
     transformBox: 'fill-box', transformOrigin: '50% 0%',
